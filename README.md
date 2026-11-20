@@ -25,6 +25,12 @@ export CICIOT2023_DATA_DIR="/path/to/extracted/dataset"
 ```
 
 1. Run `01_dataset_inspection.ipynb` from top to bottom for dataset inspection.
-2. Run `02_eda_restart.ipynb` from top to bottom to create and audit the three saved subsets in `data/subsets/`. If they already exist, skip the cell that writes the subsets and run the cells before and after it. The audit section can also run by itself once the three subset CSVs exist.
+2. Run `02_eda_restart.ipynb` from top to bottom to recreate the subsets. The **Stratified random subsets and class proportions** section uses seed 42 and writes 100,000 training rows, 25,000 validation rows, and 25,000 test rows to `data/subsets/`. The following cells report class proportions and audit the saved CSVs.
+
+The sampling cell refuses to overwrite existing CSVs. To reuse them, skip the cell that writes the subsets. To regenerate them, move the three existing CSVs out of `data/subsets/` before running that cell.
 
 The virtual environment and dataset files are local to each checkout.
+
+## Notebook conventions
+
+Introduce each analysis with a short explanation, show its code and saved outputs, then interpret the actual findings and limitations underneath. Mark any missing result as unverified.
