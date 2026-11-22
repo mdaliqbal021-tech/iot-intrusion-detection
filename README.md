@@ -12,7 +12,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-On Windows, use `py -3.12 -m venv .venv` and activate with `.venv\Scripts\Activate.ps1` in PowerShell. Open the repository folder in a notebook editor such as VS Code with its Jupyter extension. Select the project's `.venv` kernel and use the repository root as the notebook working directory.
+On Windows, use `py -3.12 -m venv .venv` and activate with `.venv\Scripts\Activate.ps1` in PowerShell. Open the repository folder in a notebook editor such as VS Code with its Jupyter extension. Select the project's `.venv` kernel and open the notebooks in `notebooks/`. The notebooks support either the repository root or `notebooks/` as the kernel working directory.
 
 ## Get the dataset and run the notebooks
 
@@ -24,8 +24,8 @@ To use an existing extraction, set `CICIOT2023_DATA_DIR` before launching your n
 export CICIOT2023_DATA_DIR="/path/to/extracted/dataset"
 ```
 
-1. Run `01_dataset_inspection.ipynb` from top to bottom for dataset inspection.
-2. Run `02_eda_restart.ipynb` from top to bottom to recreate the subsets. The **Stratified random subsets and class proportions** section uses seed 42 and writes 100,000 training rows, 25,000 validation rows, and 25,000 test rows to `data/subsets/`. The following cells report class proportions and audit the saved CSVs.
+1. Run [`01_dataset_inspection.ipynb`](notebooks/01_dataset_inspection.ipynb) from top to bottom for dataset inspection.
+2. Run [`02_eda_restart.ipynb`](notebooks/02_eda_restart.ipynb) from top to bottom to recreate the subsets. The **Stratified random subsets and class proportions** section uses seed 42 and writes 100,000 training rows, 25,000 validation rows, and 25,000 test rows to `data/subsets/`. The following cells report class proportions and audit the saved CSVs.
 
 The sampling cell refuses to overwrite existing CSVs. To reuse them, skip the cell that writes the subsets. To regenerate them, move the three existing CSVs out of `data/subsets/` before running that cell.
 
