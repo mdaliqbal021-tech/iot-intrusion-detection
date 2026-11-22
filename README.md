@@ -34,3 +34,17 @@ The virtual environment and dataset files are local to each checkout.
 ## Notebook conventions
 
 Introduce each analysis with a short explanation, show its code and saved outputs, then interpret the actual findings and limitations underneath. Mark any missing result as unverified.
+
+## Run the binary baseline from the terminal
+
+The batch training and validation modules and their shared helpers are in `Batch/`.
+
+With the saved training and validation CSVs in `data/subsets/`, run these commands from the repository root using the project virtual environment.
+
+```sh
+source .venv/bin/activate
+python -m Batch.train
+python -m Batch.validate
+```
+
+Training writes the fitted scaler and logistic regression pipeline and its ordered feature list to `data/models/binary_baseline.pkl`. Validation loads that file and prints confusion matrix counts and classification metrics for both the always-attack reference and logistic regression at the 0.5 threshold. It reports results for the full validation subset and for rows with no exact match in training across the 46 original features.
