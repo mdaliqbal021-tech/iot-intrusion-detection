@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from Batch.baseline_data import MODEL_PATH, TRAINING_PATH, binary_targets, load_features, select_model_features
+from src.batch.baseline_data import MODEL_PATH, TRAINING_PATH, binary_targets, load_features, select_model_features
 
 
 def main():

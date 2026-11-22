@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
-SUBSET_DIR = Path(__file__).resolve().parent.parent / "data" / "subsets"
+SUBSET_DIR = Path(__file__).resolve().parents[2] / "data" / "subsets"
 TRAINING_PATH = SUBSET_DIR / "ciciot2023_train_stratified_100000_seed42.csv"
 VALIDATION_PATH = SUBSET_DIR / "ciciot2023_validation_stratified_25000_seed42.csv"
 MODEL_PATH = SUBSET_DIR.parent / "models" / "binary_baseline.pkl"

@@ -10,7 +10,7 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 
-from Batch.baseline_data import (
+from src.batch.baseline_data import (
     ATTACK_THRESHOLD,
     MODEL_PATH,
     TRAINING_PATH,
