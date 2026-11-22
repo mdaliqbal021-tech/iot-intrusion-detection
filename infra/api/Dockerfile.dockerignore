@@ -3,3 +3,5 @@
 !src/
 !src/serving/
 !src/serving/api.py
+!src/streaming/
+!src/streaming/cassandra_sink.py

@@ -9,6 +9,8 @@ from pathlib import Path
 import pandas as pd
 from xgboost import XGBClassifier
 
+MAX_BATCH_ROWS = 1_000
+
 
 def score_batch(frame, model, features, attack_index, threshold):
     if frame[["replay_id", *features]].isna().any().any():
@@ -31,7 +33,9 @@ def main():
     parser.add_argument("--cassandra-run-id")
     args = parser.parse_args()
     if args.cassandra_run_id:
-        from src.streaming.cassandra_sink import write_predictions
+        from cassandra.cluster import Cluster
+
+        from src.streaming.cassandra_sink import INSERT, write_predictions
 
     metadata = json.loads((args.model_dir / "xgboost_final_metadata.json").read_text())
     features = metadata["feature_columns"]
@@ -52,24 +56,29 @@ def main():
     output_dir.mkdir()
     spark = SparkSession.builder.appName("iot-replay").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
+    cluster = None
 
     def predict_microbatch(batch, batch_id):
-        records = batch.take(33)
+        records = batch.take(MAX_BATCH_ROWS + 1)
         if not records:
             return
-        if len(records) > 32:
-            raise ValueError("A replay microbatch must contain at most 32 records.")
+        if len(records) > MAX_BATCH_ROWS:
+            raise ValueError(f"A replay microbatch must contain at most {MAX_BATCH_ROWS} records.")
         rows = pd.DataFrame.from_records(records, columns=["replay_id", *features])
         predictions = score_batch(rows, model, features, attack_index, threshold)
         if args.cassandra_run_id:
-            write_predictions(args.cassandra_run_id, predictions.itertuples(index=False, name=None))
-            print(f"Cassandra run {args.cassandra_run_id}: wrote {len(predictions)} predictions", flush=True)
+            write_predictions(session, insert, args.cassandra_run_id, predictions.itertuples(index=False, name=None))
         destination = output_dir / f"batch-{batch_id}.jsonl"
         temporary = destination.with_suffix(".tmp")
         predictions.to_json(temporary, orient="records", lines=True, double_precision=15)
         os.replace(temporary, destination)
+        print(f"Spark batch {batch_id}: scored {len(predictions)} predictions.", flush=True)
 
     try:
+        if args.cassandra_run_id:
+            cluster = Cluster(["cassandra"], protocol_version=4)
+            session = cluster.connect()
+            insert = session.prepare(INSERT)
         driver = (sys.executable, sys.version.split()[0])
         workers = spark.sparkContext.parallelize(range(2), 2).map(
             lambda _: (sys.executable, sys.version.split()[0])
@@ -85,6 +94,7 @@ def main():
             .option("kafka.bootstrap.servers", args.bootstrap_server)
             .option("subscribe", args.topic)
             .option("startingOffsets", "earliest")
+            .option("maxOffsetsPerTrigger", MAX_BATCH_ROWS)
             .load()
             .select(F.from_json(F.col("value").cast("string"), schema, {"mode": "FAILFAST"}).alias("message"))
             .select("message.*")
@@ -97,6 +107,8 @@ def main():
         )
         query.awaitTermination()
     finally:
+        if cluster is not None:
+            cluster.shutdown()
         spark.stop()
 
 

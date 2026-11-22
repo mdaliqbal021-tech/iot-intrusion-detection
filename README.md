@@ -77,7 +77,7 @@ From the repo root, compare the batch prediction output with the reference from 
   | diff - data/models/xgboost_final_check_expected.csv
 ```
 
-## Replay the final XGBoost check through Kafka and Spark
+## Replay test rows through Kafka and Spark
 
 With Python 3.10, Docker Compose, and the four XGBoost artifacts from notebook 07 in `data/models/`, run:
 
@@ -86,9 +86,9 @@ python3.10 -m venv --without-pip .venv/replay-310
 bash infra/run_replay.sh
 ```
 
-The replay code is in `src/streaming/`. Docker Compose, the Spark image definition, and the Cassandra schema are under `infra/`. The script assigns IDs 0–31 in CSV row order, publishes the rows to a fresh Kafka topic, and runs a finite Spark Structured Streaming query. Spark reads the exported model and metadata through read-only mounts. Predictions and checkpoints stay in a fresh Git-ignored directory under `data/replay/`. The comparison requires every ID exactly once, exact class agreement, and a maximum absolute score difference of `1e-7`.
+The replay code is in `src/streaming/`. Docker Compose, the Spark image definition, and the Cassandra schema are under `infra/`. The launcher assigns zero-based IDs in CSV row order, publishes the rows to a fresh Kafka topic, and runs a finite Spark Structured Streaming query in microbatches of at most 1,000 rows. Spark reads the exported model and metadata through read-only mounts. Predictions and checkpoints stay in a fresh Git-ignored directory under `data/replay/`.
 
-Run `bash infra/run_replay.sh --cassandra` to also store the predictions in the `iot_replay.predictions` table. Cassandra uses a dedicated volume and an internal Compose network. The script queries the run after the initial write and after replaying the same topic with a fresh checkpoint and the same run ID. Both queries must return the same 32 matching predictions. The primary key combines the run ID and replay row ID.
+Add `--cassandra` to store and verify the predictions in `iot_replay.predictions`. The comparison requires every ID exactly once, exact class agreement, and a maximum absolute score difference of `1e-7`. The smoke mode also compares with the saved 32-row reference and verifies a retry with the same run ID. Cassandra uses a dedicated volume and an internal Compose network. Its prediction primary key combines the run ID and replay row ID.
 
 Stop and remove the local containers with `docker compose -f infra/compose.yaml down`. The Cassandra volume and Git-ignored replay files persist.
 
@@ -99,25 +99,28 @@ With the exported artifacts in place, start the services and run the Cassandra r
 ```sh
 export IOT_API_PORT=18080 IOT_DASHBOARD_PORT=18501
 docker compose -f infra/compose.yaml up -d --build --wait kafka cassandra api dashboard
-curl -fsS "http://127.0.0.1:$IOT_API_PORT/health"
-
-mkdir -p data/replay
-set -o pipefail
-bash infra/run_replay.sh --cassandra | tee data/replay/dashboard-smoke.log
-RUN_ID=$(sed -n 's|^Replay files: .*/||p' data/replay/dashboard-smoke.log)
-printf 'Dashboard: http://127.0.0.1:%s\nRun ID: %s\n' "$IOT_DASHBOARD_PORT" "$RUN_ID"
 ```
 
-Open the printed dashboard URL, enter the printed run ID, and select **Load predictions**. The dashboard reads only from FastAPI over HTTP. Its Compose default is `http://api:8000`. Override it with `IOT_API_BASE_URL` if needed. The dashboard defaults to one CPU and 512 MB of memory. Set `IOT_DASHBOARD_CPUS` or `IOT_DASHBOARD_MEMORY` before starting Compose to change these limits.
+Choose a replay size:
+
+```sh
+bash infra/run_replay.sh --cassandra --smoke  # 32 fixed rows and an idempotency check
+bash infra/run_replay.sh --cassandra          # first 1,000 rows of the saved test subset
+bash infra/run_replay.sh --cassandra --full   # all 25,000 rows of the saved test subset
+```
+
+Open [the dashboard](http://127.0.0.1:18501). It loads the newest verified replay automatically. **Completed run** shows the saved run number, UTC completion time, and prediction count. Use **Refresh** to discover a new replay or select an older result. Class totals cover the entire run, and the chart and prediction table show up to 25 rows per page.
+
+The dashboard reads from FastAPI over HTTP. Its Compose default is `http://api:8000`. Override it with `IOT_API_BASE_URL` if needed. The dashboard defaults to one CPU and 512 MiB of memory. Set `IOT_DASHBOARD_CPUS` or `IOT_DASHBOARD_MEMORY` before starting Compose to change these limits.
 
 To query FastAPI directly:
 
 ```sh
-curl -fsS "http://127.0.0.1:$IOT_API_PORT/runs/$RUN_ID/predictions"
-curl -sS -i "http://127.0.0.1:$IOT_API_PORT/runs/unknown-run/predictions"
+curl -fsS "http://127.0.0.1:$IOT_API_PORT/health"
+curl -fsS "http://127.0.0.1:$IOT_API_PORT/runs"
 ```
 
-FastAPI and Streamlit publish on localhost. Set `IOT_API_PORT` or `IOT_DASHBOARD_PORT` to a free port if needed. Cassandra stays on the internal Compose network. A healthy response is `{"status":"ok"}`. A known run returns its ID and predictions in `replay_id` order. An unknown run returns HTTP 404, and a Cassandra outage returns HTTP 503.
+FastAPI and Streamlit publish on localhost. Set `IOT_API_PORT` or `IOT_DASHBOARD_PORT` to a free port if needed. Cassandra stays on the internal Compose network. `GET /runs` lists completed runs newest first, with saved display numbers, completion times in UTC, and prediction counts. `GET /runs/{run_id}/predictions` returns a run’s predictions in `replay_id` order. An unknown run returns HTTP 404, and a Cassandra outage returns HTTP 503.
 
 ```sh
 docker compose -f infra/compose.yaml down

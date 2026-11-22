@@ -2,6 +2,7 @@
 
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from threading import Lock
 
 from cassandra import OperationTimedOut, ReadTimeout, Unavailable
@@ -10,6 +11,8 @@ from cassandra.connection import ConnectionException
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from src.streaming.cassandra_sink import RUNS, number_existing_runs
 
 SELECT_PREDICTIONS = """
 SELECT replay_id, attack_score, predicted_class
@@ -26,6 +29,13 @@ class Prediction(BaseModel):
 class RunPredictions(BaseModel):
     run_id: str
     predictions: list[Prediction]
+
+
+class CompletedRun(BaseModel):
+    run_id: str
+    display_number: int
+    completed_at: datetime
+    prediction_count: int
 
 
 class PredictionStore:
@@ -50,6 +60,22 @@ class PredictionStore:
 
     def health(self):
         self.connect().execute("SELECT release_version FROM system.local", timeout=3)
+
+    def completed_runs(self):
+        session = self.connect()
+        rows = list(session.execute(RUNS, timeout=3))
+        if number_existing_runs(session, rows):
+            rows = list(session.execute(RUNS, timeout=3))
+        ordered = sorted(rows, key=lambda row: (row.completed_at, row.run_id), reverse=True)
+        return [
+            CompletedRun(
+                run_id=row.run_id,
+                display_number=row.display_number,
+                completed_at=row.completed_at.replace(tzinfo=timezone.utc),
+                prediction_count=row.prediction_count,
+            )
+            for row in ordered
+        ]
 
     def predictions(self, run_id):
         session = self.connect()
@@ -97,3 +123,8 @@ def run_predictions(run_id: str, request: Request):
     if not predictions:
         raise HTTPException(status_code=404, detail="Replay run not found")
     return {"run_id": run_id, "predictions": predictions}
+
+
+@app.get("/runs", response_model=list[CompletedRun])
+def completed_runs(request: Request):
+    return request.app.state.store.completed_runs()
