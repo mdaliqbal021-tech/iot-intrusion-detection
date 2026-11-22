@@ -1,0 +1,5 @@
+**
+!src/
+!src/streaming/
+!src/streaming/spark_predict.py
+!src/streaming/cassandra_sink.py

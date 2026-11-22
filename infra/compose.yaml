@@ -1,0 +1,132 @@
+name: iot-replay
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  cassandra:
+    image: cassandra:5.0.9
+    environment:
+      CASSANDRA_CLUSTER_NAME: iot-replay
+      CASSANDRA_DC: datacenter1
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+    networks:
+      - predictions
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+      - type: bind
+        source: ./cassandra/init.cql
+        target: /schema/init.cql
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "cqlsh", "127.0.0.1", "-e", "SELECT release_version FROM system.local"]
+      interval: 10s
+      timeout: 10s
+      retries: 24
+
+  cassandra-init:
+    image: cassandra:5.0.9
+    entrypoint: ["cqlsh", "cassandra", "-f", "/schema/init.cql"]
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    networks:
+      - predictions
+    volumes:
+      - type: bind
+        source: ./cassandra/init.cql
+        target: /schema/init.cql
+        read_only: true
+        bind:
+          create_host_path: false
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/api/Dockerfile
+    depends_on:
+      cassandra-init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - predictions
+    ports:
+      - "127.0.0.1:${IOT_API_PORT:-18080}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=5).close()"]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: infra/dashboard/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      IOT_API_BASE_URL: "${IOT_API_BASE_URL:-http://api:8000}"
+    ports:
+      - "127.0.0.1:${IOT_DASHBOARD_PORT:-18501}:8501"
+    cpus: ${IOT_DASHBOARD_CPUS:-1.0}
+    mem_limit: ${IOT_DASHBOARD_MEMORY:-512m}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5).close()"]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+
+  spark:
+    build:
+      context: ..
+      dockerfile: infra/spark/Dockerfile
+    networks:
+      - default
+      - predictions
+    environment:
+      OPENBLAS_NUM_THREADS: "2"
+      OMP_NUM_THREADS: "2"
+    volumes:
+      - type: bind
+        source: ../data/models/xgboost_final.ubj
+        target: /models/xgboost_final.ubj
+        read_only: true
+        bind:
+          create_host_path: false
+
+      - type: bind
+        source: ../data/models/xgboost_final_metadata.json
+        target: /models/xgboost_final_metadata.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${REPLAY_RUN_DIR:-../data/replay}
+        target: /replay
+        bind:
+          create_host_path: false
+
+networks:
+  predictions:
+    internal: true
+
+volumes:
+  cassandra_data:
