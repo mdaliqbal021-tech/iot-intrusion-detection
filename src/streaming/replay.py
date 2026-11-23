@@ -10,6 +10,24 @@ from pathlib import Path
 
 SMOKE_ROWS = 32
 SCORE_TOLERANCE = 1e-7
+MARGIN_TOLERANCE = 1e-5
+
+
+def verify_contributions(explanation, stored_score):
+    """Check all terms against the raw margin and the original attack score."""
+    margin = math.fsum([
+        explanation["bias"], *(row["contribution"] for row in explanation["features"]),
+    ])
+    raw_margin = explanation["raw_margin"]
+    if not math.isclose(margin, raw_margin, rel_tol=0, abs_tol=MARGIN_TOLERANCE):
+        raise ValueError("Feature contributions do not reconstruct the raw margin.")
+    # Native terms are float32. Apply sigmoid to the verified model margin,
+    # so rounding in the individual contributions does not affect score parity.
+    exp_term = math.exp(-abs(raw_margin))
+    score = 1 / (1 + exp_term) if raw_margin >= 0 else exp_term / (1 + exp_term)
+    if not math.isclose(score, stored_score, rel_tol=0, abs_tol=SCORE_TOLERANCE):
+        raise ValueError("The reconstructed attack score does not match the stored score.")
+    return score
 
 
 def write_messages(input_path, output_path, count, metadata_path=None):

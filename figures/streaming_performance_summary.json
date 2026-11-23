@@ -1,0 +1,324 @@
+{
+  "environment": {
+    "cpu": "AMD Ryzen 9 7940HS w/ Radeon 780M Graphics",
+    "wsl_logical_cpus": 6,
+    "wsl_memory_kib": 10186852,
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "docker_logical_cpus": 6,
+    "docker_memory_bytes": 10431336448,
+    "docker_os": "Docker Desktop (containerized)",
+    "docker_version": "29.4.0",
+    "service_limits": {
+      "kafka": {
+        "cpu_limit": null,
+        "memory_limit_bytes": null,
+        "cpuset": null
+      },
+      "cassandra": {
+        "cpu_limit": null,
+        "memory_limit_bytes": null,
+        "cpuset": null
+      },
+      "dashboard": {
+        "cpu_limit": 1.0,
+        "memory_limit_bytes": 536870912,
+        "cpuset": null
+      },
+      "replay-worker": {
+        "cpu_limit": null,
+        "memory_limit_bytes": null,
+        "cpuset": null
+      }
+    },
+    "kafka": "apache/kafka:3.9.1",
+    "cassandra": "cassandra:5.0.9",
+    "kafka_partitions": 2
+  },
+  "runs": [
+    {
+      "workload": "Smoke fixture",
+      "run_id": "run.XSIuwfM4",
+      "rows": 32,
+      "confirmed_events": 32,
+      "stored_unique_events": 32,
+      "missing_event_ids": [],
+      "duplicate_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "unexpected_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "target_send_eps": 200,
+      "actual_send_eps": 199.88125505981665,
+      "elapsed_s": 10.062492741,
+      "throughput_eps": 3.1801265177181013,
+      "median_ms": 9984.828970499999,
+      "p95_ms": 10050.488244799999,
+      "micro_batches": 1,
+      "spark_launch_to_query_s": 6.685724914,
+      "spark_launch_to_first_batch_s": 8.326341192,
+      "timing": {
+        "producer": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "target_events_per_second": 200,
+          "publish_complete_ns": 13356319811017
+        },
+        "launch": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "spark_launch_ns": 13356689065373
+        },
+        "spark": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "query_started_ns": 13363374790287,
+          "spark_version": "3.5.7",
+          "spark_master": "local[2]",
+          "python_version": "3.10.22",
+          "xgboost_runtime": "3.2.0",
+          "xgboost_export": "3.4.1",
+          "threshold": 0.5,
+          "model_sha256": "ea40536649ee763c9a6ae1adbf18ed1cd4edc5ba2c5f7c2cedb7a09ba9be77fd",
+          "trigger": "availableNow",
+          "starting_offsets": "earliest",
+          "max_offsets_per_trigger": 1000,
+          "cassandra_write_concurrency": 32,
+          "cassandra_consistency": "10",
+          "cpu_max": "max 100000",
+          "memory_max": "max"
+        }
+      }
+    },
+    {
+      "workload": "Trial 1",
+      "run_id": "run.KNuQZucQ",
+      "rows": 1000,
+      "confirmed_events": 1000,
+      "stored_unique_events": 1000,
+      "missing_event_ids": [],
+      "duplicate_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "unexpected_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "target_send_eps": 200,
+      "actual_send_eps": 199.99513709521906,
+      "elapsed_s": 16.3823572,
+      "throughput_eps": 61.04127677059806,
+      "median_ms": 13884.7314495,
+      "p95_ms": 16132.417267199999,
+      "micro_batches": 1,
+      "spark_launch_to_query_s": 6.723520013,
+      "spark_launch_to_first_batch_s": 8.176036685,
+      "timing": {
+        "producer": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "target_events_per_second": 200,
+          "publish_complete_ns": 13419645503903
+        },
+        "launch": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "spark_launch_ns": 13419988549350
+        },
+        "spark": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "query_started_ns": 13426712069363,
+          "spark_version": "3.5.7",
+          "spark_master": "local[2]",
+          "python_version": "3.10.22",
+          "xgboost_runtime": "3.2.0",
+          "xgboost_export": "3.4.1",
+          "threshold": 0.5,
+          "model_sha256": "ea40536649ee763c9a6ae1adbf18ed1cd4edc5ba2c5f7c2cedb7a09ba9be77fd",
+          "trigger": "availableNow",
+          "starting_offsets": "earliest",
+          "max_offsets_per_trigger": 1000,
+          "cassandra_write_concurrency": 32,
+          "cassandra_consistency": "10",
+          "cpu_max": "max 100000",
+          "memory_max": "max"
+        }
+      }
+    },
+    {
+      "workload": "Trial 2",
+      "run_id": "run.mfFRxgpV",
+      "rows": 1000,
+      "confirmed_events": 1000,
+      "stored_unique_events": 1000,
+      "missing_event_ids": [],
+      "duplicate_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "unexpected_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "target_send_eps": 200,
+      "actual_send_eps": 199.99391514008818,
+      "elapsed_s": 16.347356817,
+      "throughput_eps": 61.17196872830698,
+      "median_ms": 13849.641156500002,
+      "p95_ms": 16097.472618699998,
+      "micro_batches": 1,
+      "spark_launch_to_query_s": 6.62242506,
+      "spark_launch_to_first_batch_s": 8.010845437,
+      "timing": {
+        "producer": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "target_events_per_second": 200,
+          "publish_complete_ns": 13445747127833
+        },
+        "launch": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "spark_launch_ns": 13446106694232
+        },
+        "spark": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "query_started_ns": 13452729119292,
+          "spark_version": "3.5.7",
+          "spark_master": "local[2]",
+          "python_version": "3.10.22",
+          "xgboost_runtime": "3.2.0",
+          "xgboost_export": "3.4.1",
+          "threshold": 0.5,
+          "model_sha256": "ea40536649ee763c9a6ae1adbf18ed1cd4edc5ba2c5f7c2cedb7a09ba9be77fd",
+          "trigger": "availableNow",
+          "starting_offsets": "earliest",
+          "max_offsets_per_trigger": 1000,
+          "cassandra_write_concurrency": 32,
+          "cassandra_consistency": "10",
+          "cpu_max": "max 100000",
+          "memory_max": "max"
+        }
+      }
+    },
+    {
+      "workload": "Trial 3",
+      "run_id": "run.19KYjKON",
+      "rows": 1000,
+      "confirmed_events": 1000,
+      "stored_unique_events": 1000,
+      "missing_event_ids": [],
+      "duplicate_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "unexpected_event_ids": {
+        "send": [],
+        "ack": [],
+        "stored": []
+      },
+      "target_send_eps": 200,
+      "actual_send_eps": 199.9970014463587,
+      "elapsed_s": 18.991090142,
+      "throughput_eps": 52.65627157381748,
+      "median_ms": 16493.4549815,
+      "p95_ms": 18741.17830975,
+      "micro_batches": 1,
+      "spark_launch_to_query_s": 8.939080727,
+      "spark_launch_to_first_batch_s": 10.263090782,
+      "timing": {
+        "producer": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "target_events_per_second": 200,
+          "publish_complete_ns": 13471761777992
+        },
+        "launch": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "spark_launch_ns": 13472155114551
+        },
+        "spark": {
+          "clock": {
+            "clock": "CLOCK_MONOTONIC",
+            "units": "nanoseconds",
+            "boot_id": "1ec01437-919d-4720-8321-55eded26c7ed",
+            "time_namespace": "time:[4026531834]"
+          },
+          "query_started_ns": 13481094195278,
+          "spark_version": "3.5.7",
+          "spark_master": "local[2]",
+          "python_version": "3.10.22",
+          "xgboost_runtime": "3.2.0",
+          "xgboost_export": "3.4.1",
+          "threshold": 0.5,
+          "model_sha256": "ea40536649ee763c9a6ae1adbf18ed1cd4edc5ba2c5f7c2cedb7a09ba9be77fd",
+          "trigger": "availableNow",
+          "starting_offsets": "earliest",
+          "max_offsets_per_trigger": 1000,
+          "cassandra_write_concurrency": 32,
+          "cassandra_consistency": "10",
+          "cpu_max": "max 100000",
+          "memory_max": "max"
+        }
+      }
+    }
+  ]
+}

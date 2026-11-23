@@ -3,12 +3,20 @@
 import csv
 import json
 from datetime import datetime, timezone
+from errno import EEXIST, ENOTEMPTY
+from hashlib import sha256
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 TEST_CSV = "ciciot2023_test_stratified_25000_seed42.csv"
 MODEL_NAME = "xgboost_final"
+EXAMPLE_ROWS = (132, 0, 12)
+
+
+class ReplayConflict(ValueError):
+    """A replay request no longer matches its selection."""
 
 
 def utc_now():
@@ -31,7 +39,9 @@ class TestRecords:
         self.features = self.metadata["feature_columns"]
         if self.metadata["attack_threshold"] != 0.5 or self.metadata["class_mapping"] != {"0": "benign", "1": "attack"}:
             raise ValueError("Unexpected deployed threshold or class mapping.")
-        with path.open(newline="") as source:
+        contents = path.read_bytes()
+        self.dataset_sha256 = sha256(contents).hexdigest()
+        with StringIO(contents.decode("utf-8"), newline="") as source:
             reader = csv.DictReader(source)
             if not set([*self.features, "label"]).issubset(reader.fieldnames or ()):
                 raise ValueError("The held-out CSV is missing the deployed features or label.")
@@ -51,12 +61,37 @@ class TestRecords:
             "features": {feature: float(row[feature]) for feature in self.features},
         }
 
-    def enqueue(self, root, source_record_id):
+    def catalog(self):
+        return {
+            "dataset": TEST_CSV,
+            "dataset_sha256": self.dataset_sha256,
+            "count": len(self.rows),
+            "examples": [
+                {"source_record_id": index, "recorded_label": self.rows[index]["label"]}
+                for index in EXAMPLE_ROWS
+            ],
+        }
+
+    def enqueue(self, root, source_record_id, request_id=None, dataset_sha256=None):
+        if dataset_sha256 is not None and dataset_sha256 != self.dataset_sha256:
+            raise ReplayConflict("The test subset changed. Refresh the record preview before replaying.")
         record = self.record(source_record_id)
-        run_id = f"selected.{uuid4().hex}"
+        run_id = f"selected.{(request_id or uuid4()).hex}"
+        destination = root / run_id
+
+        def existing_job():
+            existing = read_json(destination / "status.json")
+            if (existing["source_record_id"] != source_record_id
+                    or existing.get("dataset_sha256") != self.dataset_sha256):
+                raise ReplayConflict("This request ID already belongs to another record or test subset.")
+            return existing
+
+        if destination.exists():
+            return existing_job()
         job = {
             "run_id": run_id,
             "source_record_id": source_record_id,
+            "dataset_sha256": self.dataset_sha256,
             "replay_id": 0,
             "recorded_label": record["recorded_label"],
             "model_version": f"{MODEL_NAME} (exported with XGBoost {self.metadata['xgboost_version']})",
@@ -73,5 +108,10 @@ class TestRecords:
             payload = {"source_record_id": source_record_id, "replay_id": 0, **record["features"]}
             (directory / "input.jsonl").write_text(json.dumps(payload, allow_nan=False) + "\n")
             write_status(directory, job)
-            directory.rename(root / run_id)
+            try:
+                directory.rename(destination)
+            except OSError as error:
+                if error.errno not in (EEXIST, ENOTEMPTY):
+                    raise
+                return existing_job()
         return job

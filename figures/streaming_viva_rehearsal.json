@@ -1,0 +1,18 @@
+{
+  "command": "docker compose -f infra/compose.yaml up -d --no-build --wait dashboard replay-worker",
+  "stack_startup_s": 34.420181206,
+  "boundary": "Stopped service containers, existing images and Cassandra volume, Docker daemon already running; command entry to Compose readiness.",
+  "record_number": 1,
+  "source_record_id": 0,
+  "run_id": "selected.323915e92d8043bca91ecb442d0118e7",
+  "event_id": 0,
+  "click_to_prediction_s": 20.765522303,
+  "spark_job_s": 13.35461604000011,
+  "attack_score": 0.9999685287475586,
+  "prediction": "Suspected attack",
+  "cassandra_cqlsh_command": "docker compose -f infra/compose.yaml exec -T cassandra cqlsh -e 'SELECT run_id, replay_id, attack_score, predicted_class FROM iot_replay.predictions WHERE run_id = '\"'\"'selected.323915e92d8043bca91ecb442d0118e7'\"'\"' AND replay_id = 0;'",
+  "viewport_px": [
+    1366,
+    768
+  ]
+}

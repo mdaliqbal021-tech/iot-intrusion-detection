@@ -4,9 +4,12 @@ cd "$(dirname "$0")/.."
 
 cassandra=false
 mode=demo
+timing_rate=""
 for argument in "$@"; do
     case "$argument" in
         --cassandra) cassandra=true ;;
+        --timing-rate=) printf 'Specify a positive timing rate.\n' >&2; exit 2 ;;
+        --timing-rate=*) timing_rate=${argument#*=} ;;
         --smoke|--full)
             if [[ $mode != demo ]]; then
                 printf 'Select only one replay size.\n' >&2
@@ -14,9 +17,14 @@ for argument in "$@"; do
             fi
             mode=${argument#--}
             ;;
-        *) printf 'Usage: %s [--cassandra] [--smoke | --full]\n' "$0" >&2; exit 2 ;;
+        *) printf 'Usage: %s [--cassandra] [--smoke | --full] [--timing-rate=EVENTS_PER_SECOND]\n' "$0" >&2; exit 2 ;;
     esac
 done
+
+if [[ -n $timing_rate ]] && { ! $cassandra || [[ ! $timing_rate =~ ^[1-9][0-9]*$ ]]; }; then
+    printf 'Timing requires --cassandra and a positive integer rate.\n' >&2
+    exit 2
+fi
 
 python=${REPLAY_PYTHON:-.venv/replay-310/bin/python}
 "$python" -c 'import sys; print(f"Host Python: {sys.executable} ({sys.version.split()[0]})"); sys.exit("Replay requires host Python 3.10") if sys.version_info[:2] != (3, 10) else None'
@@ -51,10 +59,18 @@ if $cassandra; then
 fi
 "${compose[@]}" exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
     --create --topic "$topic" --partitions 2 --replication-factor 1
-"${compose[@]}" exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 \
-    --topic "$topic" --producer-property acks=all < "$REPLAY_RUN_DIR/input.jsonl"
+if [[ -n $timing_rate ]]; then
+    # Prepare the image before publication so the paced measurements exclude build time.
+    "${compose[@]}" build spark
+    "${compose[@]}" run --rm --no-deps spark --timing-producer "$topic" --run-id "$run_id" --rate "$timing_rate"
+    "$python" -m src.streaming.replay_timing "$REPLAY_RUN_DIR"
+    "${compose[@]}" run --rm --no-deps spark "$topic" "${sink_args[@]}" --record-timing
+else
+    "${compose[@]}" exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 \
+        --topic "$topic" --producer-property acks=all < "$REPLAY_RUN_DIR/input.jsonl"
 
-"${compose[@]}" run --rm --build --no-deps spark "$topic" "${sink_args[@]}"
+    "${compose[@]}" run --rm --build --no-deps spark "$topic" "${sink_args[@]}"
+fi
 spark_output="$REPLAY_RUN_DIR/predictions"
 expected="$spark_output"
 if [[ $mode == smoke ]]; then

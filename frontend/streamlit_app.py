@@ -1,30 +1,32 @@
 """Select recorded IoT traffic for replay and inspect Cassandra results."""
 
-import json
 import os
 import shlex
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import quote
+from uuid import uuid4
 
 import requests
 import streamlit as st
 
+from frontend.results_views import show_explanation, show_model_results
+
 API_BASE_URL = os.environ.get("IOT_API_BASE_URL", "http://127.0.0.1:18080").rstrip("/")
-FIGURES = Path(__file__).resolve().parents[1] / "figures"
 PAGE_SIZE = 25
 CLASS_LABELS = {0: "Benign", 1: "Suspected attack"}
 ACTIVE_STATUSES = {"queued", "processing"}
 
 
-def request_json(path, payload=None):
+def request_json(path, payload=None, on_rejected=None):
     try:
         response = requests.request(
             "POST" if payload is not None else "GET", f"{API_BASE_URL}{path}",
             json=payload, timeout=(2, 4),
         )
-        if response.status_code in (404, 422):
-            st.warning(response.json()["detail"] if response.status_code == 404 else "The replay request is invalid.")
+        if response.status_code in (404, 409, 422):
+            if on_rejected is not None:
+                on_rejected()
+            st.warning(response.json()["detail"] if response.status_code != 422 else "The replay request is invalid.")
             return None
         response.raise_for_status()
         return response.json()
@@ -35,13 +37,26 @@ def request_json(path, payload=None):
     return None
 
 
-def cassandra_proof(run_id, event_id):
+def technical_details(run_id, event_id, job=None):
     escaped_run = run_id.replace("'", "''")
     query = (
         "SELECT run_id, replay_id, attack_score, predicted_class FROM iot_replay.predictions "
         f"WHERE run_id = '{escaped_run}' AND replay_id = {int(event_id)};"
     )
-    with st.expander("Cassandra proof"):
+    with st.expander("Technical details"):
+        if job is not None:
+            st.markdown(f"**Source-record ID** `{job['source_record_id']}`")
+            if job.get("dataset_sha256"):
+                st.caption("Held-out test CSV SHA-256")
+                st.code(job["dataset_sha256"], language=None)
+            timings = job.get("timings_ms", {})
+            for key, description in {
+                "kafka_publish": "Kafka producer through acknowledged publish",
+                "spark_job": "Spark startup, Kafka read, scoring, Cassandra write and shutdown",
+                "worker_total": "Worker processing through Cassandra verification and run registration",
+            }.items():
+                if key in timings:
+                    st.write(f"**{timings[key] / 1_000:.3f} s** · {description}")
         st.markdown("**Keyspace** `iot_replay` · **Table** `predictions`")
         st.markdown(f"**Partition key** `run_id = {run_id}` · **Clustering key** `replay_id = {event_id}`")
         st.caption("Run from the repository root in WSL.")
@@ -63,23 +78,13 @@ def show_record_prediction(job, row):
         f"{'at or above' if is_attack else 'below'} {threshold:g}, "
         f"so the model classified this record as {'a suspected attack' if is_attack else 'benign'}."
     )
-    st.markdown(
-        f"**Recorded label** `{job['recorded_label']}` · **Model** {job['model_version']}"
-    )
-    with st.expander("Replay identifiers and timing"):
-        st.table({
-            "Identifier": ["Source record ID", "Run ID", "Within-run event ID"],
-            "Value": [str(job["source_record_id"]), job["run_id"], str(row["replay_id"])],
-        }, hide_index=True)
-        timings = job["timings_ms"]
-        for key, description in {
-            "kafka_publish": "Kafka producer process through acknowledged publish",
-            "spark_job": "Spark process startup, Kafka read, scoring, Cassandra write and shutdown",
-            "worker_total": "Worker processing through Cassandra read-back and run registration",
-        }.items():
-            if key in timings:
-                st.write(f"**{timings[key] / 1_000:.3f} s** · {description}")
-    cassandra_proof(job["run_id"], row["replay_id"])
+    label = job.get("recorded_label")
+    if label:
+        agrees = is_attack == (label != "BenignTraffic")
+        agreement = "Agrees with the recorded label" if agrees else "Differs from the recorded label"
+        st.markdown(f"**Recorded label** `{label}` · **{agreement}**")
+    st.caption(f"Model · {job['model_version']}")
+    technical_details(job["run_id"], row["replay_id"], job)
 
 
 def show_saved_batch(rows, run_id):
@@ -123,65 +128,130 @@ def show_saved_batch(rows, run_id):
     ], hide_index=True)
     event_ids = [row["replay_id"] for row in shown]
     event = st.selectbox("Event for Cassandra verification", event_ids, key=f"event_{run_id}")
-    cassandra_proof(run_id, event)
+    technical_details(run_id, event)
 
 
-def show_model_comparison():
-    st.subheader("Model comparison")
-    with st.expander("Validation ROC and model results"):
-        st.caption("25,000 validation rows · threshold 0.5 for class predictions · notebooks 05 and 08")
-        try:
-            rows = json.loads((FIGURES / "validation_model_comparison.json").read_text())
-            st.dataframe(rows, hide_index=True, column_config={
-                field: st.column_config.NumberColumn(format="percent") for field in
-                ("Accuracy", "Balanced accuracy", "Attack recall", "Benign false-positive rate")
-            } | {"ROC-AUC": st.column_config.NumberColumn(format="%.6f")})
-            st.image(str(FIGURES / "validation_roc.png"), width="stretch")
-        except OSError:
-            st.warning("The saved notebook 05 comparison artifacts are unavailable.")
-    with st.expander("Recorded inference benchmark"):
-        st.caption("Notebook 06 · median time per whole batch on two CPU threads · local probability prediction")
-        image = FIGURES / "inference_speed.png"
-        if image.is_file():
-            st.image(str(image), width="stretch")
-        else:
-            st.warning("The saved notebook 06 speed figure is unavailable.")
+def traffic_label(recorded_label):
+    family = recorded_label.split("-", 1)[0]
+    return {"BenignTraffic": "Benign traffic", "DDoS": "DDoS traffic", "Mirai": "Mirai traffic"}.get(
+        family, recorded_label,
+    )
+
+
+def select_input_record():
+    st.session_state.saved_run_choice = None
+
+
+def schedule_replay(source_record_id, dataset_sha256):
+    current = st.session_state.get("active_replay")
+    if current and current["status"] in ACTIVE_STATUSES:
+        return
+    if "pending_submission" not in st.session_state:
+        st.session_state.pending_submission = {
+            "source_record_id": source_record_id, "dataset_sha256": dataset_sha256,
+            "request_id": str(uuid4()),
+        }
+    select_input_record()
+    st.session_state.send_pending = True
+
+
+def show_record_selector(catalog):
+    examples = {
+        example["source_record_id"]: f"Example {i} · {traffic_label(example['recorded_label'])}"
+        for i, example in enumerate(catalog["examples"], start=1)
+    }
+    pending = st.session_state.get("pending_submission")
+    example = st.selectbox(
+        "Choose a test record", list(examples), format_func=examples.__getitem__,
+        disabled=pending is not None, on_change=select_input_record,
+    )
+    st.caption("Example names describe recorded labels.")
+    with st.expander(f"Browse all {catalog['count']:,} test records", expanded=False):
+        use_browser = st.checkbox("Use the record number below", disabled=pending is not None,
+                                  on_change=select_input_record)
+        record_number = st.number_input(
+            "Record number", min_value=1, max_value=catalog["count"], step=1,
+            disabled=pending is not None, on_change=select_input_record,
+        )
+    source_id = record_number - 1 if use_browser else example
+    if pending is not None:
+        source_id = pending["source_record_id"]
+    selection = "Full-record browser" if use_browser else examples[example]
+    st.markdown(f"**Will replay Record {source_id + 1:,}** · {selection}")
+
+    record = request_json(f"/test-records/{source_id}")
+    if record is None:
+        return
+    st.caption(f"Recorded label · {record['recorded_label']}")
+    current = st.session_state.get("active_replay")
+    st.button(
+        "Retry submission" if pending else "Start replay", type="primary", width="stretch",
+        disabled=bool(current and current["status"] in ACTIVE_STATUSES),
+        on_click=schedule_replay, args=(source_id, catalog["dataset_sha256"]),
+    )
+    if pending:
+        st.caption("Retry checks the same submission and keeps its original run ID.")
+    return record
+
+
+def invalidate_history():
+    st.session_state.pop("completed_runs", None)
+    st.session_state.pop("prediction_history", None)
+
+
+def show_prediction_history():
+    st.subheader("Prediction history")
+    if "prediction_history" not in st.session_state:
+        history = request_json("/history")
+        if history is None:
+            return
+        st.session_state.prediction_history = history
+    history = st.session_state.prediction_history
+    if not history:
+        st.info("No completed runs yet. Verified Cassandra results will appear here.")
+        return
+
+    rows = []
+    for entry in history:
+        prediction = entry.get("prediction", {})
+        source_id = entry.get("source_record_id")
+        rows.append({
+            "Run": entry["display_number"],
+            "Completed (UTC)": datetime.fromisoformat(entry["completed_at"]).strftime("%d %b %H:%M:%S"),
+            "Test record": f"Record {source_id + 1:,}" if source_id is not None else "—",
+            "Recorded label": entry.get("recorded_label") or "—",
+            "Prediction": CLASS_LABELS.get(prediction.get("predicted_class"), "Open completed run"),
+            "Attack score": prediction.get("attack_score"),
+            "Events": entry["prediction_count"],
+        })
+    st.caption("Latest 10 completed runs. Use Completed run in the sidebar to open any saved result.")
+    st.dataframe(rows, hide_index=True, column_config={
+        "Attack score": st.column_config.NumberColumn(format="%.8f"),
+    })
 
 
 st.set_page_config(page_title="IoT traffic replay", layout="wide")
 st.title("IoT traffic replay")
-st.write("Replay a recorded CICIoT2023 traffic record and see whether the deployed XGBoost model flags it as a suspected attack.")
+st.write("This system passively screens recorded CICIoT2023 network flows for suspected attacks.")
 
 with st.sidebar:
+    view = st.radio("View", ["Replay", "Explain prediction", "Model results"])
     st.header("Replay controls")
-    refresh = st.button("Refresh", width="stretch")
-    if refresh:
-        st.session_state.pop("completed_runs", None)
-    catalog = request_json("/test-records")
-    if catalog is not None:
-        source_record_id = st.number_input(
-            "Test source record ID", min_value=0, max_value=catalog["count"] - 1, step=1,
-            help="Zero-based row position in the fixed seed-42 held-out CSV.",
+    if st.session_state.pop("send_pending", False):
+        submitted = request_json(
+            "/replays", st.session_state.pending_submission,
+            on_rejected=lambda: st.session_state.pop("pending_submission", None),
         )
-        record = request_json(f"/test-records/{source_record_id}")
-        if record is not None:
-            st.write(f"Recorded label **{record['recorded_label']}**")
-            with st.expander("Preview model inputs"):
-                st.dataframe(
-                    [{"Feature": name, "Value": value} for name, value in record["features"].items()],
-                    hide_index=True, height=250,
-                )
-            current = st.session_state.get("active_replay")
-            if st.button("Start replay", type="primary", width="stretch",
-                         disabled=bool(current and current["status"] in ACTIVE_STATUSES)):
-                submitted = request_json("/replays", {"source_record_id": source_record_id})
-                if submitted is not None:
-                    st.session_state.active_replay = submitted
-                    st.rerun()
+        if submitted is not None:
+            st.session_state.pop("pending_submission")
+            st.session_state.active_replay = submitted
 
+    refresh = st.button("Refresh", width="stretch", on_click=invalidate_history)
+    catalog = request_json("/test-records")
+    record = show_record_selector(catalog) if catalog is not None else None
     st.divider()
     st.subheader("Saved results")
-    if "completed_runs" not in st.session_state:
+    if catalog is not None and "completed_runs" not in st.session_state:
         runs = request_json("/runs")
         if runs is not None:
             st.session_state.completed_runs = runs
@@ -195,7 +265,14 @@ with st.sidebar:
         for row in runs
     }
     saved_run = st.selectbox("Completed run", list(saved_labels), index=None,
-                            format_func=saved_labels.__getitem__, placeholder="Select a completed run")
+                            format_func=saved_labels.__getitem__, placeholder="Select a completed run",
+                            key="saved_run_choice")
+
+
+def show_run_explanation(run_id):
+    explanation = request_json(f"/runs/{quote(run_id, safe='')}/explanation")
+    if explanation is not None:
+        show_explanation(explanation, CLASS_LABELS)
 
 
 def load_result(run_id):
@@ -213,24 +290,33 @@ poll_interval = 2 if current and current["status"] in ACTIVE_STATUSES else None
 
 @st.fragment(run_every=poll_interval)
 def show_current_replay():
-    st.subheader("Selected record replay")
     job = st.session_state.get("active_replay")
-    if job is None:
-        st.info("Choose a held-out test record in the sidebar and start a replay.")
-        return
-
-    if job["status"] in ACTIVE_STATUSES:
+    show_current = view != "Model results" and not saved_run
+    matches_selection = job and record and record["source_record_id"] == job["source_record_id"]
+    if show_current and view == "Replay":
+        st.subheader("Selected record replay")
+    if job and job["status"] in ACTIVE_STATUSES:
         updated = request_json(f"/replays/{quote(job['run_id'], safe='')}")
         if updated is None:
-            st.caption(f"Last known status · {job['status'].title()} · {job['run_id']}")
+            if show_current and matches_selection:
+                st.caption(f"Last known status · {job['status'].title()}")
             return
         st.session_state.active_replay = job = updated
         if job["status"] not in ACTIVE_STATUSES:
-            st.session_state.pop("completed_runs", None)
+            invalidate_history()
             st.rerun()
 
-    st.caption(f"Source record {job['source_record_id']:,} · event {job['replay_id']} · run {job['run_id']}")
+    if not show_current:
+        return
+    if not matches_selection:
+        st.info("Start a replay for the selected flow, or choose a completed run in the sidebar.")
+        return
+
+    st.caption(f"Record {job['source_record_id'] + 1:,}")
     if job["status"] == "completed":
+        if view == "Explain prediction":
+            show_run_explanation(job["run_id"])
+            return
         result = load_result(job["run_id"])
         if result is not None:
             show_record_prediction(job, result["predictions"][0])
@@ -238,23 +324,42 @@ def show_current_replay():
         st.error(f"Failed · {job['stage']}. {job['error']}")
     else:
         st.info(f"{job['status'].title()} · {job['stage']}")
+    if job["status"] != "completed":
+        with st.expander("Technical details"):
+            st.write(f"Source-record ID · {job['source_record_id']}  |  Run ID · {job['run_id']}")
 
 
+if view == "Replay" and record is not None:
+    st.subheader("Selected flow")
+    st.write(f"**Record {record['source_record_id'] + 1:,}** · Recorded label **{record['recorded_label']}**")
+    preview = record["features"]
+    st.caption(" · ".join(f"{key} {preview[key]:.5g}" for key in ("Protocol Type", "Duration", "Rate")))
+    with st.expander(f"Ordered model features ({len(preview)})"):
+        st.dataframe(
+            [{"Feature": name, "Value": value} for name, value in preview.items()],
+            hide_index=True, height=260,
+        )
+
+if view == "Explain prediction":
+    st.header("Explain prediction")
+    st.caption("Individual replay · native XGBoost feature contributions")
 show_current_replay()
-if saved_run and (current is None or saved_run != current["run_id"]):
-    st.subheader("Completed run")
-    result = load_result(saved_run)
-    if result is not None:
-        if saved_run.startswith("selected."):
-            job = request_json(f"/replays/{quote(saved_run, safe='')}")
+if view == "Model results":
+    show_model_results()
+elif view == "Explain prediction" and saved_run:
+    st.caption("Completed run selected in the sidebar")
+    show_run_explanation(saved_run)
+elif view == "Replay":
+    if saved_run:
+        st.subheader("Completed run")
+        result = load_result(saved_run)
+        if result is not None:
+            job = request_json(f"/replays/{quote(saved_run, safe='')}") if saved_run.startswith("selected.") else None
             if job is not None:
-                st.caption(f"Source record {job['source_record_id']:,} · event {job['replay_id']} · run {saved_run}")
+                st.caption(f"Record {job['source_record_id'] + 1:,}")
                 show_record_prediction(job, result["predictions"][0])
             else:
+                st.caption(saved_run)
                 show_saved_batch(result["predictions"], saved_run)
-        else:
-            st.caption(saved_run)
-            show_saved_batch(result["predictions"], saved_run)
-elif st.session_state.get("completed_runs") == []:
-    st.caption("No completed runs yet. New runs appear here once their Cassandra results are verified.")
-show_model_comparison()
+    if catalog is not None:
+        show_prediction_history()

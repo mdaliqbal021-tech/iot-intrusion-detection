@@ -92,6 +92,30 @@ Add `--cassandra` to store and verify the predictions in `iot_replay.predictions
 
 Stop and remove the local containers with `docker compose -f infra/compose.yaml down`. The Cassandra volume and Git-ignored replay files persist.
 
+## Measure end-to-end replay
+
+The timed CLI publishes through the bundled Kafka client at a paced rate, waits for publication to finish, then starts a fresh Spark process. It records a Linux monotonic timestamp immediately before each Kafka send call. The Cassandra acknowledgement is shared by the rows in each micro-batch and recorded after the concurrent write helper returns successfully. Notebook 09 reports latency from send to this acknowledgement and throughput from first send to last acknowledgement. It measures Spark startup separately within that interval. Notebook 06 measures local model calls.
+
+From Bash in the repo root, start the prepared stack and run a fresh benchmark. The following commands retain the existing saved results in `figures/`:
+
+```bash
+docker compose -f infra/compose.yaml build dashboard api replay-worker spark
+docker compose -f infra/compose.yaml up -d --no-build --wait dashboard replay-worker
+bench=$(mktemp -d)
+set -o pipefail
+bash infra/run_replay.sh --cassandra --smoke --timing-rate=200 | tee "$bench/smoke.log"
+for trial in 1 2 3; do
+  bash infra/run_replay.sh --cassandra --timing-rate=200 | tee "$bench/trial-$trial.log" || break
+done
+.venv/bin/python -m src.streaming.summarize_replay --output "$bench" \
+  --smoke "$(sed -n 's/^Replay files: //p' "$bench/smoke.log")" \
+  "$(sed -n 's/^Replay files: //p' "$bench/trial-1.log")" \
+  "$(sed -n 's/^Replay files: //p' "$bench/trial-2.log")" \
+  "$(sed -n 's/^Replay files: //p' "$bench/trial-3.log")"
+```
+
+The 1,000-row repetitions use the same first 1,000 held-out test records. Inspect the saved per-run comparison in [notebook 09](notebooks/09_streaming_performance.ipynb) or under **Model results → Measured streaming replay performance**.
+
 ## Start the prediction API and dashboard
 
 From the repository root in WSL, build and start the dashboard and replay worker. The held-out CSV and deployed model files are mounted read-only. Spark's Kafka connector JARs are resolved during the image build and reused at replay time.
@@ -100,7 +124,13 @@ From the repository root in WSL, build and start the dashboard and replay worker
 docker compose -f infra/compose.yaml up -d --build --wait dashboard replay-worker
 ```
 
-Open [the dashboard](http://127.0.0.1:18501), enter a **Test source record ID** from 0 to 24,999, preview the recorded label and features, then click **Start replay**. The source ID is the zero-based row position in the fixed seed-42 test subset. Every submission has its own run ID and one within-run event, with event ID 0. **Completed run** opens a saved result, including earlier CLI runs. The model comparison uses the saved notebook artifacts in `figures/`.
+Open [the dashboard](http://127.0.0.1:18501). **Choose a test record** defaults to a held-out benign example. Example names describe the recorded labels. To select another row, open **Browse all 25,000 test records**, enable **Use the record number below**, and enter a number from 1 to 25,000. The **Will replay** line shows which selection takes effect. Preview the flow and click **Start replay**.
+
+Record numbers are one-based. The technical source-record ID is the zero-based row position paired with the SHA-256 of the fixed seed-42 CSV (`9a6b68f43ac6da53c56acd0833c65c93eaa56ab0ea150b12ea61d06d49866b12` for the evaluated subset). Each new replay has its own run ID and one within-run event with ID 0. Retries of the same submission reuse the run ID. **Completed run** opens saved results, including CLI runs. **Prediction history** shows recent Cassandra results. The model comparison uses the saved notebook artifacts in `figures/`.
+
+For the viva, start **Example 1 · Benign traffic** in **Replay**, wait for **Completed**, then select **Explain prediction**. The bars show the largest signed contributions in raw log-odds from the model and exact input used by Spark. **Verify the score reconstruction** shows the bias, sum across all features, model margin, and score checked against Cassandra. Switch to **Example 2 · DDoS traffic** and start another replay to explain the attack example. To explain an older single-record run, select its test record and replay it to capture the explanation.
+
+Open **Model results** to review the validation comparison from notebook 05, the full held-out test results from notebook 07, and the two-thread local CPU batch benchmark from notebook 06. This view loads the saved artifacts from `figures/`.
 
 The equivalent API submission returns a queued run ID. Poll its replay status until it completes, then read its Cassandra result through the existing predictions endpoint.
 
@@ -110,13 +140,13 @@ curl -fsS "localhost:18080/replays/$run_id"
 curl -fsS "localhost:18080/runs/$run_id/predictions"
 ```
 
-Set `run_id` to the ID returned by the submission. The **Cassandra proof** panel supplies the exact read-only command for the displayed prediction. For a selected single-record replay, the command is:
+Set `run_id` to the ID returned by the submission. API clients can send a UUIDv4 `request_id` and the catalog's `dataset_sha256` with the source ID for safe submission retries. **Technical details** supplies the exact read-only Cassandra command for the displayed prediction. For a selected single-record replay, the command is:
 
 ```sh
 docker compose -f infra/compose.yaml exec -T cassandra cqlsh -e "SELECT run_id, replay_id, attack_score, predicted_class FROM iot_replay.predictions WHERE run_id = '$run_id' AND replay_id = 0;"
 ```
 
-The batch CLI remains available:
+The batch CLI remains available. Its 32-row smoke fixture is a fixed sample used for score parity, separate from the 25,000-row test catalog:
 
 ```sh
 bash infra/run_replay.sh --cassandra --smoke  # 32 fixed rows and an idempotency check

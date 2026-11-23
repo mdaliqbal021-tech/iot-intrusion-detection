@@ -1,0 +1,11 @@
+{
+  "model": "XGBoost",
+  "scope": "Full held-out test",
+  "rows": 25000,
+  "threshold": 0.5,
+  "TN": 579,
+  "FP": 10,
+  "FN": 116,
+  "TP": 24295,
+  "source": "07_final_test_evaluation.ipynb, In [2] \u00b7 Score the full test sample"
+}

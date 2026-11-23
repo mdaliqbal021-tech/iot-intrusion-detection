@@ -2,8 +2,12 @@
 !requirements.txt
 !frontend/
 !frontend/streamlit_app.py
+!frontend/results_views.py
 !frontend/theme.toml
 !figures/
 !figures/validation_roc.png
 !figures/validation_model_comparison.json
 !figures/inference_speed.png
+!figures/validation_confusion_matrices.png
+!figures/final_test_results.json
+!figures/streaming_performance_summary.json

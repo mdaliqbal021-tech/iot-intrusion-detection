@@ -6,3 +6,4 @@
 !src/streaming/
 !src/streaming/cassandra_sink.py
 !src/streaming/selected_replay.py
+!src/streaming/replay.py
