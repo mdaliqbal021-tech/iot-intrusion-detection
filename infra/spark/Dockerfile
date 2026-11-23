@@ -1,3 +1,4 @@
+FROM apache/kafka:3.9.1 AS kafka
 FROM python:3.10-slim-bookworm
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openjdk-17-jre-headless libgomp1 procps \
@@ -8,6 +9,17 @@ ENV PYSPARK_DRIVER_PYTHON=/usr/local/bin/python3.10 \
     PYSPARK_PYTHON=/usr/local/bin/python3.10 \
     PYTHONPATH=/app
 RUN python3.10 -m pip install --no-cache-dir cassandra-driver==3.29.3
+
+# Resolve the connector and its dependencies once while building the image.
+RUN printf 'pass\n' > /tmp/resolve-kafka.py \
+    && SPARK_LOCAL_IP=127.0.0.1 spark-submit --master 'local[1]' \
+        --conf spark.jars.ivy=/tmp/spark-ivy \
+        --repositories https://repo.maven.apache.org/maven2 \
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.7 /tmp/resolve-kafka.py \
+    && mv /tmp/spark-ivy/jars /opt/iot-kafka-jars \
+    && rm -rf /tmp/spark-ivy /tmp/resolve-kafka.py
+COPY --from=kafka /opt/kafka /opt/kafka
 WORKDIR /app
-COPY src/streaming/spark_predict.py src/streaming/cassandra_sink.py /app/src/streaming/
-ENTRYPOINT ["spark-submit", "--master", "local[2]", "--conf", "spark.ui.enabled=false", "--conf", "spark.jars.ivy=/tmp/spark-ivy", "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.7", "/app/src/streaming/spark_predict.py"]
+COPY src/streaming/ /app/src/streaming/
+COPY --chmod=755 infra/spark/run-spark.sh /usr/local/bin/iot-spark-replay
+ENTRYPOINT ["/usr/local/bin/iot-spark-replay"]

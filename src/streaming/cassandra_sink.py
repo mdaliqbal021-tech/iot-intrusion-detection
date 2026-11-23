@@ -58,6 +58,22 @@ def number_existing_runs(session, runs):
     return bool(unnumbered)
 
 
+def register_completed_run(session, run_id, expected_count=None):
+    runs = list(session.execute(RUNS))
+    number_existing_runs(session, runs)
+    if any(run.run_id == run_id for run in runs):
+        return
+    count = session.execute(session.prepare(COUNT), (run_id,)).one().prediction_count
+    if not count or (expected_count is not None and count != expected_count):
+        raise ValueError(f"Cannot register run with {count} predictions (expected {expected_count}).")
+    display_number = next_display_number(session)
+    result = session.execute(
+        session.prepare(COMPLETE), (run_id, datetime.now(timezone.utc), count, display_number)
+    ).one()
+    if result.applied:
+        print(f"Registered Run {display_number} ({run_id}) with {count:,} predictions.", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Query or register a completed Cassandra replay run.")
     parser.add_argument("run_id")
@@ -67,19 +83,10 @@ def main():
     with Cluster(["cassandra"], protocol_version=4) as cluster:
         session = cluster.connect()
         if args.complete:
-            runs = list(session.execute(RUNS))
-            number_existing_runs(session, runs)
-            if any(run.run_id == args.run_id for run in runs):
-                return
-            count = session.execute(session.prepare(COUNT), (args.run_id,)).one().prediction_count
-            if not count or (args.expected_count is not None and count != args.expected_count):
-                parser.exit(1, f"Cannot register run with {count} predictions (expected {args.expected_count}).\n")
-            display_number = next_display_number(session)
-            result = session.execute(
-                session.prepare(COMPLETE), (args.run_id, datetime.now(timezone.utc), count, display_number)
-            ).one()
-            if result.applied:
-                print(f"Registered Run {display_number} ({args.run_id}) with {count:,} predictions.")
+            try:
+                register_completed_run(session, args.run_id, args.expected_count)
+            except ValueError as error:
+                parser.exit(1, f"{error}\n")
         else:
             query = session.prepare(SELECT)
             for row in session.execute(query, (args.run_id,)):

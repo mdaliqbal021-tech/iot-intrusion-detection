@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--model-dir", type=Path, default=Path("/models"))
     parser.add_argument("--run-dir", type=Path, default=Path("/replay"))
     parser.add_argument("--cassandra-run-id")
+    parser.add_argument("--source-record-id", type=int)
     args = parser.parse_args()
     if args.cassandra_run_id:
         from cassandra.cluster import Cluster
@@ -50,6 +51,7 @@ def main():
 
     schema = T.StructType([
         T.StructField("replay_id", T.LongType()),
+        T.StructField("source_record_id", T.LongType()),
         *[T.StructField(feature, T.DoubleType()) for feature in features],
     ])
     output_dir = args.run_dir / "predictions"
@@ -64,7 +66,12 @@ def main():
             return
         if len(records) > MAX_BATCH_ROWS:
             raise ValueError(f"A replay microbatch must contain at most {MAX_BATCH_ROWS} records.")
-        rows = pd.DataFrame.from_records(records, columns=["replay_id", *features])
+        rows = pd.DataFrame.from_records(records, columns=["replay_id", "source_record_id", *features])
+        if args.source_record_id is not None:
+            if (len(rows) != 1 or rows["replay_id"].iloc[0] != 0
+                    or rows["source_record_id"].iloc[0] != args.source_record_id):
+                raise ValueError("Kafka event does not match the selected source record.")
+            print(f"Consumed source record {args.source_record_id} as event 0 from {args.topic}.", flush=True)
         predictions = score_batch(rows, model, features, attack_index, threshold)
         if args.cassandra_run_id:
             write_predictions(session, insert, args.cassandra_run_id, predictions.itertuples(index=False, name=None))

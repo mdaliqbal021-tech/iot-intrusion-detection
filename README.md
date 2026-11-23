@@ -94,14 +94,29 @@ Stop and remove the local containers with `docker compose -f infra/compose.yaml 
 
 ## Start the prediction API and dashboard
 
-With the exported artifacts in place, start the services and run the Cassandra replay from the repo root in Bash.
+From the repository root in WSL, build and start the dashboard and replay worker. The held-out CSV and deployed model files are mounted read-only. Spark's Kafka connector JARs are resolved during the image build and reused at replay time.
 
 ```sh
-export IOT_API_PORT=18080 IOT_DASHBOARD_PORT=18501
-docker compose -f infra/compose.yaml up -d --build --wait kafka cassandra api dashboard
+docker compose -f infra/compose.yaml up -d --build --wait dashboard replay-worker
 ```
 
-Choose a replay size:
+Open [the dashboard](http://127.0.0.1:18501), enter a **Test source record ID** from 0 to 24,999, preview the recorded label and features, then click **Start replay**. The source ID is the zero-based row position in the fixed seed-42 test subset. Every submission has its own run ID and one within-run event, with event ID 0. **Completed run** opens a saved result, including earlier CLI runs. The model comparison uses the saved notebook artifacts in `figures/`.
+
+The equivalent API submission returns a queued run ID. Poll its replay status until it completes, then read its Cassandra result through the existing predictions endpoint.
+
+```sh
+curl -fsS localhost:18080/replays -H 'Content-Type: application/json' -d '{"source_record_id":132}'
+curl -fsS "localhost:18080/replays/$run_id"
+curl -fsS "localhost:18080/runs/$run_id/predictions"
+```
+
+Set `run_id` to the ID returned by the submission. The **Cassandra proof** panel supplies the exact read-only command for the displayed prediction. For a selected single-record replay, the command is:
+
+```sh
+docker compose -f infra/compose.yaml exec -T cassandra cqlsh -e "SELECT run_id, replay_id, attack_score, predicted_class FROM iot_replay.predictions WHERE run_id = '$run_id' AND replay_id = 0;"
+```
+
+The batch CLI remains available:
 
 ```sh
 bash infra/run_replay.sh --cassandra --smoke  # 32 fixed rows and an idempotency check
@@ -109,18 +124,7 @@ bash infra/run_replay.sh --cassandra          # first 1,000 rows of the saved te
 bash infra/run_replay.sh --cassandra --full   # all 25,000 rows of the saved test subset
 ```
 
-Open [the dashboard](http://127.0.0.1:18501). It loads the newest verified replay automatically. **Completed run** shows the saved run number, UTC completion time, and prediction count. Use **Refresh** to discover a new replay or select an older result. Class totals cover the entire run, and the chart and prediction table show up to 25 rows per page.
-
-The dashboard reads from FastAPI over HTTP. Its Compose default is `http://api:8000`. Override it with `IOT_API_BASE_URL` if needed. The dashboard defaults to one CPU and 512 MiB of memory. Set `IOT_DASHBOARD_CPUS` or `IOT_DASHBOARD_MEMORY` before starting Compose to change these limits.
-
-To query FastAPI directly:
-
-```sh
-curl -fsS "http://127.0.0.1:$IOT_API_PORT/health"
-curl -fsS "http://127.0.0.1:$IOT_API_PORT/runs"
-```
-
-FastAPI and Streamlit publish on localhost. Set `IOT_API_PORT` or `IOT_DASHBOARD_PORT` to a free port if needed. Cassandra stays on the internal Compose network. `GET /runs` lists completed runs newest first, with saved display numbers, completion times in UTC, and prediction counts. `GET /runs/{run_id}/predictions` returns a run’s predictions in `replay_id` order. An unknown run returns HTTP 404, and a Cassandra outage returns HTTP 503.
+FastAPI and Streamlit listen on localhost. Set `IOT_API_PORT` or `IOT_DASHBOARD_PORT` to change the host ports. The dashboard uses `http://api:8000` unless `IOT_API_BASE_URL` overrides it. Its default limits are one CPU and 512 MiB, configurable with `IOT_DASHBOARD_CPUS` and `IOT_DASHBOARD_MEMORY`. Cassandra stays on the internal Compose network. Selected replay status, Kafka inputs, and worker logs are under `data/replay/selected/<run_id>/`.
 
 ```sh
 docker compose -f infra/compose.yaml down

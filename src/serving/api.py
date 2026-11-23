@@ -1,8 +1,10 @@
-"""Read stored IoT replay predictions over HTTP."""
+"""Select held-out IoT records and read stored replay predictions over HTTP."""
 
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
+from re import fullmatch
 from threading import Lock
 
 from cassandra import OperationTimedOut, ReadTimeout, Unavailable
@@ -10,9 +12,10 @@ from cassandra.cluster import Cluster, NoHostAvailable, UnresolvableContactPoint
 from cassandra.connection import ConnectionException
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.streaming.cassandra_sink import RUNS, number_existing_runs
+from src.streaming.selected_replay import TEST_CSV, TestRecords, read_json
 
 SELECT_PREDICTIONS = """
 SELECT replay_id, attack_score, predicted_class
@@ -36,6 +39,10 @@ class CompletedRun(BaseModel):
     display_number: int
     completed_at: datetime
     prediction_count: int
+
+
+class ReplaySelection(BaseModel):
+    source_record_id: int = Field(ge=0, strict=True)
 
 
 class PredictionStore:
@@ -92,6 +99,11 @@ class PredictionStore:
 @asynccontextmanager
 async def lifespan(app):
     app.state.store = PredictionStore(os.environ.get("CASSANDRA_HOST", "cassandra"))
+    app.state.jobs = Path(os.environ.get("IOT_REPLAY_JOBS", "data/replay/selected"))
+    app.state.test_records = TestRecords(
+        Path(os.environ.get("IOT_TEST_CSV", f"data/subsets/{TEST_CSV}")),
+        Path(os.environ.get("IOT_MODEL_METADATA", "data/models/xgboost_final_metadata.json")),
+    )
     try:
         yield
     finally:
@@ -128,3 +140,34 @@ def run_predictions(run_id: str, request: Request):
 @app.get("/runs", response_model=list[CompletedRun])
 def completed_runs(request: Request):
     return request.app.state.store.completed_runs()
+
+
+@app.get("/test-records")
+def test_records(request: Request):
+    return {"dataset": TEST_CSV, "count": len(request.app.state.test_records.rows)}
+
+
+@app.get("/test-records/{source_record_id}")
+def test_record(source_record_id: int, request: Request):
+    try:
+        return request.app.state.test_records.record(source_record_id)
+    except IndexError:
+        raise HTTPException(status_code=404, detail="Test record ID is outside the held-out subset.")
+
+
+@app.post("/replays", status_code=202)
+def start_replay(selection: ReplaySelection, request: Request):
+    try:
+        return request.app.state.test_records.enqueue(request.app.state.jobs, selection.source_record_id)
+    except IndexError:
+        raise HTTPException(status_code=404, detail="Test record ID is outside the held-out subset.")
+
+
+@app.get("/replays/{run_id}")
+def replay_status(run_id: str, request: Request):
+    if not fullmatch(r"selected\.[0-9a-f]{32}", run_id):
+        raise HTTPException(status_code=404, detail="Replay status is unavailable for this run.")
+    try:
+        return read_json(request.app.state.jobs / run_id / "status.json")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Replay run not found.")

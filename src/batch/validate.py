@@ -20,6 +20,43 @@ from src.batch.baseline_data import (
     validation_overlap,
 )
 
+CONFUSION_COUNTS = ["TN", "FP", "FN", "TP"]
+CLASSIFICATION_RATES = ["Accuracy", "Attack precision", "Attack recall", "Benign precision", "Benign recall"]
+
+
+def confusion_report(scores):
+    """Verify evaluation counts and derive rates in benign/attack matrix order."""
+    report = scores.copy()
+    count_columns = ["Rows", *CONFUSION_COUNTS]
+    counts = report[count_columns]
+    integer_counts = counts.astype("int64")
+    if not counts.eq(integer_counts).all(axis=None):
+        raise ValueError("The sample size and confusion counts must be integers.")
+    report[count_columns] = integer_counts
+    if not report[CONFUSION_COUNTS].sum(axis=1).eq(report["Rows"]).all():
+        raise ValueError("Confusion counts do not sum to the stated sample size.")
+    tn, fp, fn, tp = (report[column] for column in CONFUSION_COUNTS)
+    denominators = (report["Rows"], tp + fp, tp + fn, tn + fn, tn + fp)
+    numerators = (tn + tp, tp, tp, tn, tn)
+    for column, numerator, denominator in zip(CLASSIFICATION_RATES, numerators, denominators, strict=True):
+        rate = numerator / denominator.where(denominator.ne(0))
+        if column in report:
+            defined = rate.notna()
+            np.testing.assert_allclose(report.loc[defined, column], rate[defined], rtol=0, atol=1e-15)
+        report[column] = rate
+    return report
+
+
+def format_confusion_report(report, extra_columns=()):
+    """Format notebook results while preserving unrounded rates in the source frame."""
+    formatted = report.reset_index().rename(columns={"Validation": "Scope", "Rows": "N"})
+    for column in [*CLASSIFICATION_RATES, *extra_columns]:
+        if column == "ROC-AUC":
+            formatted[column] = formatted[column].map("{:.6f}".format)
+        else:
+            formatted[column] = formatted[column].map("{:.4%}".format, na_action="ignore").fillna("N/A")
+    return formatted[["Model", "Scope", "N", *CONFUSION_COUNTS, *CLASSIFICATION_RATES, *extra_columns]]
+
 
 def score_predictions(y_validation, predictions, evaluation_masks):
     results = []

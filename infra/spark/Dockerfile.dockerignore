@@ -1,5 +1,7 @@
 **
 !src/
 !src/streaming/
-!src/streaming/spark_predict.py
-!src/streaming/cassandra_sink.py
+!src/streaming/*.py
+!infra/
+!infra/spark/
+!infra/spark/run-spark.sh

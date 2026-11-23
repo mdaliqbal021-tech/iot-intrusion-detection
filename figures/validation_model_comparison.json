@@ -1,0 +1,50 @@
+[
+  {
+    "Model":"Logistic Regression",
+    "Rows":25000,
+    "TN":581,
+    "FP":4,
+    "FN":502,
+    "TP":23913,
+    "Accuracy":0.97976,
+    "Attack precision":0.999832754944182,
+    "Attack recall":0.979438869547409,
+    "Benign precision":0.536472760849492,
+    "Benign recall":0.993162393162393,
+    "Balanced accuracy":0.986300631354901,
+    "Benign false-positive rate":0.006837606837607,
+    "ROC-AUC":0.993571347304708
+  },
+  {
+    "Model":"Random Forest",
+    "Rows":25000,
+    "TN":576,
+    "FP":9,
+    "FN":214,
+    "TP":24201,
+    "Accuracy":0.99108,
+    "Attack precision":0.999628252788104,
+    "Attack recall":0.991234896579971,
+    "Benign precision":0.729113924050633,
+    "Benign recall":0.984615384615385,
+    "Balanced accuracy":0.987925140597678,
+    "Benign false-positive rate":0.015384615384615,
+    "ROC-AUC":0.998951849343002
+  },
+  {
+    "Model":"XGBoost",
+    "Rows":25000,
+    "TN":583,
+    "FP":2,
+    "FN":122,
+    "TP":24293,
+    "Accuracy":0.99504,
+    "Attack precision":0.999917678534678,
+    "Attack recall":0.99500307188204,
+    "Benign precision":0.826950354609929,
+    "Benign recall":0.996581196581197,
+    "Balanced accuracy":0.995792134231618,
+    "Benign false-positive rate":0.003418803418803,
+    "ROC-AUC":0.999508988974482
+  }
+]

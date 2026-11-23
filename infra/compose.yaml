@@ -67,6 +67,14 @@ services:
     networks:
       - default
       - predictions
+    environment:
+      IOT_REPLAY_JOBS: /replay-jobs/selected
+      IOT_TEST_CSV: /input/ciciot2023_test_stratified_25000_seed42.csv
+      IOT_MODEL_METADATA: /models/xgboost_final_metadata.json
+    volumes:
+      - ../data/replay:/replay-jobs
+      - ../data/subsets/ciciot2023_test_stratified_25000_seed42.csv:/input/ciciot2023_test_stratified_25000_seed42.csv:ro
+      - ../data/models/xgboost_final_metadata.json:/models/xgboost_final_metadata.json:ro
     ports:
       - "127.0.0.1:${IOT_API_PORT:-18080}:8000"
     healthcheck:
@@ -95,7 +103,7 @@ services:
       retries: 12
 
   spark:
-    build:
+    build: &spark_build
       context: ..
       dockerfile: infra/spark/Dockerfile
     networks:
@@ -105,14 +113,16 @@ services:
       OPENBLAS_NUM_THREADS: "2"
       OMP_NUM_THREADS: "2"
     volumes:
-      - type: bind
+      - &model_mount
+        type: bind
         source: ../data/models/xgboost_final.ubj
         target: /models/xgboost_final.ubj
         read_only: true
         bind:
           create_host_path: false
 
-      - type: bind
+      - &metadata_mount
+        type: bind
         source: ../data/models/xgboost_final_metadata.json
         target: /models/xgboost_final_metadata.json
         read_only: true
@@ -123,6 +133,27 @@ services:
         target: /replay
         bind:
           create_host_path: false
+
+  replay-worker:
+    build: *spark_build
+    init: true
+    restart: on-failure
+    entrypoint: ["python3.10", "-m", "src.streaming.replay_worker"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      cassandra-init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - predictions
+    environment:
+      OPENBLAS_NUM_THREADS: "2"
+      OMP_NUM_THREADS: "2"
+    volumes:
+      - *model_mount
+      - *metadata_mount
+      - ../data/replay:/replay-jobs
 
 networks:
   predictions:

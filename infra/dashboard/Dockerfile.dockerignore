@@ -2,3 +2,8 @@
 !requirements.txt
 !frontend/
 !frontend/streamlit_app.py
+!frontend/theme.toml
+!figures/
+!figures/validation_roc.png
+!figures/validation_model_comparison.json
+!figures/inference_speed.png
